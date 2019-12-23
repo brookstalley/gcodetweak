@@ -58,13 +58,13 @@ def zAdjust(curX, curY, curZ, curE, origX, origY, origZ, origE):
     """
     if (origZ >= zModStart):
         distanceFromCenter = (origX ** 2 + origY ** 2) ** .5
-        origMoveDistance = math.sqrt((origX - curX)**2 + (origY - curY)**2 + (origZ - curZ)**2)
         radians = math.atan2(origY, origX)
         debug ('Got {r}rad for {x},{y}'.format(r = radians, x=origX, y = origY))
         zModStrength = (origZ - zModStart) * zModIncreasePerZ
         sinPhase = math.sin(radians*sinesPerLayer)
         zMod = zModStrength * sinPhase
         newZ = origZ + zMod
+        origMoveDistance = math.sqrt((origX - curX)**2 + (origY - curY)**2 + (origZ - curZ)**2)
         newMoveDistance = math.sqrt((origX - curX)**2 + (origY - curY)**2 + (newZ - curZ)**2)
         distRatio = newMoveDistance / origMoveDistance
         #print("origE: {oe}, curE: {ce:.5f}, dr: {dr}, nmd: {nmd}, omd: {omd}".format(oe = origE, ce = curE, dr = distRatio, nmd = newMoveDistance, omd = origMoveDistance))
@@ -80,6 +80,7 @@ def debug(message):
 
 with open(os.path.join(indir,infile), 'r') as fh:
     lineNumber = 0
+    layerBands = False
     changedZ = False
     curE = float(0)
     prevX = float(0)
@@ -127,7 +128,9 @@ with open(os.path.join(indir,infile), 'r') as fh:
                 newZ = origZ
                 newE = origE
                 newZ, newE = zAdjust(m.abs_pos.X, m.abs_pos.Y, m.abs_pos.Z, prevE, origX, origY, origZ, origE)
-                newE = extrudeAdjust(m.abs_pos.X, m.abs_pos.Y, m.abs_pos.Z, prevE, newX, newY, newZ, newE)
+               
+                if (layerBands):
+                    newE = extrudeAdjust(m.abs_pos.X, m.abs_pos.Y, m.abs_pos.Z, prevE, newX, newY, newZ, newE)
 
                 if (newE < 0):
                     newE = origE/2
