@@ -1,6 +1,8 @@
 import pygcode
 
 from pygcode.machine import Position, Machine
+from pygcode.words import str2word
+from pygcode.block import words2gcodes
 from pygcode import Line, GCode, Word
 from pygcode.exceptions import *
 from pygcode.gcodes import (
@@ -15,18 +17,34 @@ import math
 
 indir = os.path.normpath("c:/users/brook/onedrive/documents/gcode/")
 
-infile = "cup5-95x93.gcode"
+#infile = "cup5-95x93.gcode"
 
-outfile = "cup5-waves-250x130-tweaked.gcode"
-
+extrudeMod = False
 extrudeModStartZ = 5.0
 extrudeModZFreq = 10.0
 extrudeModZAmpPct = 0.02
 
+zMod = True
 zModStart = 5.0
-zModIncreasePerZ = 0.05
+zModIncreasePerZ = 0.02
+zModType="Sine"
+zModPerLayer = 6
 zCurrentMod = 0.0
-sinesPerLayer = 4
+
+myFile = "simple-vase-200x122"
+
+infile = os.path.join(indir,myFile + ".gcode")
+
+paramString = ""
+if (zMod):
+    paramString = paramString + "-zm{zmt}_{zmpl}_{zmi}".format(zmt=zModType, zmpl = zModPerLayer, zmi = zModIncreasePerZ)
+if (extrudeMod):
+    paramString = paramString + "-em{emzf}_{emza}".format(emzf=extrudeModZFreq, emza=extrudeModZAmpPct)
+print(paramString)
+
+outfile = os.path.join(indir,myFile + paramString + ".gcode")
+
+print("Processing {inf} to {outf}".format(inf = infile, outf=outfile))
 
 m = Machine()
 
@@ -40,7 +58,7 @@ def extrudeAdjust(curX,curY,curZ,curE,newX,newY,newZ,newE):
     """ Creates periodid (in Z) thinning/thickening of extrusion
     ""  returns new extrusion distance
     """
-    if (curZ >= extrudeModStartZ):
+    if (extrudeMod and (curZ >= extrudeModStartZ)):
         relativeZ = curZ - extrudeModStartZ
         # it should done sin cycle per extrudeModZFreq mm in height
         modPhase = 2*math.pi * relativeZ 
@@ -52,33 +70,39 @@ def extrudeAdjust(curX,curY,curZ,curE,newX,newY,newZ,newE):
         return newE
 
 def zAdjust(curX, curY, curZ, curE, origX, origY, origZ, origE):
+    global zMod
     """ returns newZ, newE 
     """
     """ Assumes center of piece is at origin (0,0)
     """
-    if (origZ >= zModStart):
-        distanceFromCenter = (origX ** 2 + origY ** 2) ** .5
+    if (zMod and (origZ >= zModStart)):
+        #distanceFromCenter = (origX ** 2 + origY ** 2) ** .5
         radians = math.atan2(origY, origX)
-        debug ('Got {r}rad for {x},{y}'.format(r = radians, x=origX, y = origY))
+        #debug ('Got {r}rad for {x},{y}'.format(r = radians, x=origX, y = origY))
         zModStrength = (origZ - zModStart) * zModIncreasePerZ
-        sinPhase = math.sin(radians*sinesPerLayer)
-        zMod = zModStrength * sinPhase
-        newZ = origZ + zMod
+        if (zModType == "Sine"):
+            sinPhase = math.sin(radians*zModPerLayer)
+            zMod = zModStrength * sinPhase
+            newZ = origZ + zMod
+        else:
+            print("Unknown zModType: {zm}".format(zm=zModType))
+            return origZ, origE
         origMoveDistance = math.sqrt((origX - curX)**2 + (origY - curY)**2 + (origZ - curZ)**2)
         newMoveDistance = math.sqrt((origX - curX)**2 + (origY - curY)**2 + (newZ - curZ)**2)
         distRatio = newMoveDistance / origMoveDistance
         #print("origE: {oe}, curE: {ce:.5f}, dr: {dr}, nmd: {nmd}, omd: {omd}".format(oe = origE, ce = curE, dr = distRatio, nmd = newMoveDistance, omd = origMoveDistance))
         newE = ((origE - curE) * distRatio) + curE
-        debug("Adding {z}, adjusting E from {oe} to {ne}".format(z = zMod, oe=origE, ne=newE))
+        #debug("Adding {z}, adjusting E from {oe} to {ne}".format(z = zMod, oe=origE, ne=newE))
         return newZ, newE
     else:
         return origZ, origE
 
 def debug(message):
-    #print(message)
+    print(message)
     return False
 
-with open(os.path.join(indir,infile), 'r') as fh:
+with open(infile, 'r') as fhIn:
+    fhOut = open(outfile, 'w')
     lineNumber = 0
     layerBands = False
     changedZ = False
@@ -86,8 +110,9 @@ with open(os.path.join(indir,infile), 'r') as fh:
     prevX = float(0)
     prevY = float(0)
     prevZ = float(0)
-    prevE = float(0)    
-    for line_text in fh.readlines():
+    prevE = float(0)
+    lastZ = float(0)
+    for line_text in fhIn.readlines():
 
         lineNumber = lineNumber + 1
         line = Line(line_text)
@@ -116,16 +141,22 @@ with open(os.path.join(indir,infile), 'r') as fh:
                 if word.letter == "Z":
                     hasZ = True
                     origZ = float(word.value)
+                    lastZ = origZ # save in 
                 if word.letter == "E":
                     hasE = True
                     origE = float(word.value)
                 if word.letter == "G":
                     if word.value == 92:
                         prevE = 0                   
-            if (hasX and hasY and hasZ and hasE):
+            if (hasX and hasY and hasE):
                 newX = origX
                 newY = origY
-                newZ = origZ
+                if (hasZ):
+                    newZ = origZ
+                else:
+                    origZ = lastZ
+                    newZ = lastZ
+                    #debug("@@{z}".format(z=lastZ))
                 newE = origE
                 newZ, newE = zAdjust(m.abs_pos.X, m.abs_pos.Y, m.abs_pos.Z, prevE, origX, origY, origZ, origE)
                
@@ -148,7 +179,16 @@ with open(os.path.join(indir,infile), 'r') as fh:
                         word.value = "{:.3f}".format(newZ) 
                     if word.letter == "E":
                         word.value = "{:.4f}".format(newE)
-                debug("*** X: {X} -> {nX}, Y: {Y} -> {nY}, Z: {Z} -> {nZ}, E: {E} -> {nE}".format(X = origX, Y=origY, Z= origZ, E=origE, nX = newX, nY = newY, nZ = newZ, nE = newE))
+                if (not hasZ):
+                    inferZ = "Z{:.3f}".format(newZ)
+                    sw = str2word(inferZ)
+                    #debug(sw)
+                    line.block.words.append(sw)
+                    (line.block.gcodes, line.block.modal_params) = words2gcodes(line.block.words)
+                    #debug("! from {lt} to {ln} using {iz}".format(lt = line_text, ln = str(line), iz = inferZ))
+                #debug("*** X: {X} -> {nX}, Y: {Y} -> {nY}, Z: {Z} -> {nZ}, E: {E} -> {nE}".format(X = origX, Y=origY, Z= origZ, E=origE, nX = newX, nY = newY, nZ = newZ, nE = newE))
+                if (origZ != newZ) or (not hasZ):
+                    line.comment = "; z {oz} to {nz}".format(oz=origZ, nz=newZ)
                 prevX = newX
                 prevY = newY
                 prevZ = newZ
@@ -156,11 +196,8 @@ with open(os.path.join(indir,infile), 'r') as fh:
         try:
             m.process_block(line.block)
         except MachineInvalidState:
-            debug("here")
+            #debug("here")
+            continue
         finally:
             # if we've started messing with Z, only allow output lines that have X, Y, AND Z (or don't have any movement)
-            if (not hasX and not hasY):
-                print (line)   
-            else: 
-                if (hasZ or (not changedZ)):
-                    print(line)
+            print(str(line), file = fhOut)
